@@ -1,66 +1,49 @@
-import json,urllib2,sys,optparse,argparse
+import sys,optparse,argparse
+import json, csv, urllib2
+from unidecode import unidecode
 
 parser = argparse.ArgumentParser(description='Creates email addresses with optional formatters from names of employees of a company on LinkedIn.')
-parser.add_argument('COMPANY', 
-                    help='Company ID')
-parser.add_argument('DOMAIN',
-                    help='Domain to be used in email address')
-parser.add_argument('COOKIE',
-                    help='Cookie file',metavar="FILE")
+parser.add_argument(
+	"--company",
+	metavar="company-id",
+	help='Company Identificator'
+)
 
-parser.add_argument("-f", 
-                  action="store_true", dest="abbrevF", default=False,
-                  help="abbreviate first name")
+parser.add_argument(
+	"--cookie-file",
+	help='Cookie file',
+	default="cookie.txt",
+	type=argparse.FileType('rb')
+)
 
-parser.add_argument("-l",
-                  action="store_true", dest="abbrevL", default=False,
-                  help="abbreviate last name")
-
-parser.add_argument("-s",
-                  action="store_true", dest="swap", default=False,
-                  help="switch order of first and last names")
+parser.add_argument(
+	"--email-format",
+	help="Email Format (eg: {first:1.1}{last}@domain.xyz, {first}.{last}@domain.com)"
+)
 
 args = parser.parse_args()
 
-if(len(sys.argv) < 4):
-	print("Usage: python harvest.py <COMPANY ID> <DOMAIN> <COOKIE FILE>")
-	exit()
-
-
-company_id = args.COMPANY
-domain = args.DOMAIN
-csrf_token = ''
-session_id = ''
+company_id = args.company
+email_format = args.email_format
 
 #get cookies
-f = open(args.COOKIE,"r")
-content = f.readlines()
-csrf_token = content[0][:-1] #removes newline
-session_id = content[1][:-1] #removes newline
-f.close()
+content = args.cookie_file.readlines()
+csrf_token = content[0].strip()
+session_id = content[1].strip()
 
 cookie1 = 'li_at='+session_id
 cookie2 = 'JSESSIONID='+csrf_token
 
-emails = []
-
 last_page = False
 
-def format_name(name):
-	name = name.lower()
-	#remove apostrophes and periods from names
-	name = name.replace('\'','')
-	name = name.replace('.','')
-	name = name.replace(',','')
-	name = name.replace('(','')
-	name = name.replace(')','')
+def normalize(str, remove_specials = True, remove_accents = True, remove_certs = True):
+	pass
 
-	name = name.replace(' ', '.')
-	email = name + '@' + domain + '\n'
-	return email
+employees = []
 
 def harvest(curr):
 	global last_page
+	global employees
 
 	url = ("https://www.linkedin.com/voyager/api/search/blended?"
 	"count=49&origin=OTHER&queryContext=List(spellCorrectionEnabled-%3Etrue,"
@@ -77,48 +60,31 @@ def harvest(curr):
 
 	if len(data) != 49:
 		last_page = True
-	
-	for employee in data:
-		employee = employee["image"]
-		employee = employee["attributes"]
-		employee = employee[0]
-		employee = employee["miniProfile"]
-		fname = employee["firstName"]
-		lname = employee["lastName"]
-		fname = fname.replace(' ', '')
-		lname = lname.replace(' ', '')
-		if fname == "":
-			continue
-		if args.abbrevF:
-			fname = fname[0:1]
-		if args.abbrevL:
-			lname = lname[0:1]
-		if args.swap:
-			fullname = lname + ' ' + fname
-		else:
-			fullname = fname + ' ' + lname
 
-		email = format_name(fullname)
-		emails.append(email)
+	for profile in data:
+		employee = profile["image"]["attributes"][0]["miniProfile"]
+
+		first = employee["firstName"]
+		first = first.split(" ")[0] if " " in first else first
+
+		last = employee["lastName"]
+		last = last.split(",")[0] if "," in last else last
+		last = last.split(" - ")[0] if " - " in last else last
+		last = last.split(" ")[-1] if " " in last else last
+
+		print "{};{};{}".format(
+			employee["firstName"].encode("utf-8"),
+			email_format.format(**{
+				"first":  unidecode(first),
+				"last": unidecode(last),
+			}).lower(),
+			employee["occupation"].encode("utf-8")
+		)
 
 curr = 0
 while not last_page:
 	harvest(curr)
 	curr = curr + 49
-
-
-f = open('./emails.txt',"w+")
-count = len(emails)
-for i in emails:
-   try:
-      f.write(i)
-   except:
-      print('error writing one email due to strange character')
-    
-
-f.close()
-
-print("Done! " + str(count) + " emails have been written to ./emails.txt")
       
 
 
